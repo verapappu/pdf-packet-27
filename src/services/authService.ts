@@ -1,13 +1,16 @@
-export class AuthService {
-  private isAuth = false
+import { supabase } from './supabaseClient'
 
+export class AuthService {
   async signInAdmin(email: string, password: string) {
     try {
-      if (password === 'admin123') {
-        this.isAuth = true
-        return { user: { id: '1', email: email || 'admin@example.com' } }
-      }
-      throw new Error('Invalid login credentials')
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
+
+      if (error) throw error
+
+      return { user: data.user }
     } catch (err) {
       if (err instanceof Error) {
         throw err
@@ -18,7 +21,8 @@ export class AuthService {
 
   async signOut() {
     try {
-      this.isAuth = false
+      const { error } = await supabase.auth.signOut()
+      if (error) throw error
     } catch (err) {
       console.error('Sign out error:', err)
       throw err
@@ -26,23 +30,33 @@ export class AuthService {
   }
 
   async getUser() {
-    if (this.isAuth) {
-      return { id: '1', email: 'admin@example.com' }
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      return user
+    } catch (err) {
+      console.error('Get user error:', err)
+      return null
     }
-    return null
   }
 
   async isAuthenticated(): Promise<boolean> {
-    return this.isAuth
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      return !!user
+    } catch {
+      return false
+    }
   }
 
   onAuthStateChange(callback: (isAuthenticated: boolean) => void) {
-    const checkAuth = () => {
-      callback(this.isAuth)
-    }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        callback(!!session?.user)
+      }
+    )
 
     return () => {
-      // unsubscribe
+      subscription?.unsubscribe()
     }
   }
 }

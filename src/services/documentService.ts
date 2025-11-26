@@ -1,54 +1,7 @@
+import { supabase } from './supabaseClient'
 import type { Document, DocumentType, ProductType } from '@/types'
 
 class DocumentService {
-  private documents: Map<string, Document> = new Map()
-  private nextId = 1
-
-  constructor() {
-    this.loadFromLocalStorage()
-  }
-
-  private loadFromLocalStorage() {
-    try {
-      const stored = localStorage.getItem('documents')
-      if (stored) {
-        const docs: Document[] = JSON.parse(stored)
-        docs.forEach(doc => {
-          this.documents.set(doc.id, doc)
-        })
-      }
-    } catch (error) {
-      console.error('Error loading documents from storage:', error)
-    }
-  }
-
-  private saveToLocalStorage() {
-    try {
-      const docs = Array.from(this.documents.values())
-      localStorage.setItem('documents', JSON.stringify(docs))
-    } catch (error) {
-      console.error('Error saving documents to storage:', error)
-    }
-  }
-
-  async getAllDocuments(): Promise<Document[]> {
-    return Array.from(this.documents.values()).sort((a, b) =>
-      new Date(b.filename).getTime() - new Date(a.filename).getTime()
-    )
-  }
-
-  async getDocumentsByProductType(productType: ProductType): Promise<Document[]> {
-    return Array.from(this.documents.values())
-      .filter(doc => doc.productType === productType)
-      .sort((a, b) =>
-        new Date(b.filename).getTime() - new Date(a.filename).getTime()
-      )
-  }
-
-  async getDocument(id: string): Promise<Document | null> {
-    return this.documents.get(id) || null
-  }
-
   private async validatePDF(file: File): Promise<{ valid: boolean; error?: string }> {
     if (file.type !== 'application/pdf') {
       return { valid: false, error: 'File must be a PDF document' }
@@ -78,6 +31,91 @@ class DocumentService {
     }
   }
 
+  async getAllDocuments(): Promise<Document[]> {
+    try {
+      const { data, error } = await supabase
+        .from('documents')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+
+      return (data || []).map(doc => ({
+        id: doc.id,
+        name: doc.name,
+        description: doc.description,
+        filename: doc.filename,
+        url: '',
+        size: doc.size,
+        type: doc.type,
+        required: doc.required,
+        products: doc.products,
+        productType: doc.product_type
+      }))
+    } catch (error) {
+      console.error('Error fetching documents:', error)
+      return []
+    }
+  }
+
+  async getDocumentsByProductType(productType: ProductType): Promise<Document[]> {
+    try {
+      const { data, error } = await supabase
+        .from('documents')
+        .select('*')
+        .eq('product_type', productType)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+
+      return (data || []).map(doc => ({
+        id: doc.id,
+        name: doc.name,
+        description: doc.description,
+        filename: doc.filename,
+        url: '',
+        size: doc.size,
+        type: doc.type,
+        required: doc.required,
+        products: doc.products,
+        productType: doc.product_type
+      }))
+    } catch (error) {
+      console.error('Error fetching documents by product type:', error)
+      return []
+    }
+  }
+
+  async getDocument(id: string): Promise<Document | null> {
+    try {
+      const { data, error } = await supabase
+        .from('documents')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle()
+
+      if (error) throw error
+
+      if (!data) return null
+
+      return {
+        id: data.id,
+        name: data.name,
+        description: data.description,
+        filename: data.filename,
+        url: '',
+        size: data.size,
+        type: data.type,
+        required: data.required,
+        products: data.products,
+        productType: data.product_type
+      }
+    } catch (error) {
+      console.error('Error fetching document:', error)
+      return null
+    }
+  }
+
   async uploadDocument(
     file: File,
     productType: ProductType,
@@ -91,41 +129,45 @@ class DocumentService {
     try {
       if (onProgress) onProgress(25)
 
-      const fileData = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onloadend = () => {
-          const base64 = reader.result as string
-          const base64Data = base64.split(',')[1]
-          resolve(base64Data)
-        }
-        reader.onerror = reject
-        reader.readAsDataURL(file)
-      })
+      const fileBuffer = await file.arrayBuffer()
 
       if (onProgress) onProgress(50)
 
       const type = this.detectDocumentType(file.name)
       const name = this.extractDocumentName(file.name, type)
 
-      const doc: Document = {
-        id: `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        name,
-        description: `${type} Document`,
-        filename: file.name,
-        url: `data:application/pdf;base64,${fileData}`,
-        size: file.size,
-        type,
-        required: false,
-        products: [],
-        productType
-      }
+      const { data, error } = await supabase
+        .from('documents')
+        .insert({
+          name,
+          description: `${type} Document`,
+          filename: file.name,
+          file_data: new Uint8Array(fileBuffer),
+          size: file.size,
+          type,
+          required: false,
+          products: [],
+          product_type: productType
+        })
+        .select()
+        .single()
 
-      this.documents.set(doc.id, doc)
-      this.saveToLocalStorage()
+      if (error) throw error
 
       if (onProgress) onProgress(100)
 
-      return doc
+      return {
+        id: data.id,
+        name: data.name,
+        description: data.description,
+        filename: data.filename,
+        url: '',
+        size: data.size,
+        type: data.type,
+        required: data.required,
+        products: data.products,
+        productType: data.product_type
+      }
     } catch (error) {
       console.error('Error in uploadDocument:', error)
       throw error instanceof Error ? error : new Error('Failed to upload document')
@@ -133,54 +175,58 @@ class DocumentService {
   }
 
   async updateDocument(id: string, updates: Partial<Document>): Promise<void> {
-    const existing = this.documents.get(id)
-    if (!existing) {
-      throw new Error('Document not found')
-    }
+    try {
+      const updateData: Record<string, any> = {}
 
-    const updated: Document = {
-      ...existing,
-      ...updates,
-      id: existing.id,
-      productType: existing.productType,
-      url: existing.url
-    }
+      if (updates.name) updateData.name = updates.name
+      if (updates.description) updateData.description = updates.description
+      if (updates.type) updateData.type = updates.type
+      if ('required' in updates) updateData.required = updates.required
+      if (updates.products) updateData.products = updates.products
 
-    this.documents.set(id, updated)
-    this.saveToLocalStorage()
+      const { error } = await supabase
+        .from('documents')
+        .update(updateData)
+        .eq('id', id)
+
+      if (error) throw error
+    } catch (error) {
+      console.error('Error updating document:', error)
+      throw error instanceof Error ? error : new Error('Failed to update document')
+    }
   }
 
   async deleteDocument(id: string): Promise<void> {
-    if (!this.documents.has(id)) {
-      throw new Error('Document not found')
-    }
+    try {
+      const { error } = await supabase
+        .from('documents')
+        .delete()
+        .eq('id', id)
 
-    this.documents.delete(id)
-    this.saveToLocalStorage()
+      if (error) throw error
+    } catch (error) {
+      console.error('Error deleting document:', error)
+      throw error instanceof Error ? error : new Error('Failed to delete document')
+    }
   }
 
   async exportDocumentAsBase64(id: string): Promise<string | null> {
-    const doc = this.documents.get(id)
-    if (!doc || !doc.url) return null
-
     try {
-      if (doc.url.startsWith('data:')) {
-        return doc.url.split(',')[1]
+      const { data, error } = await supabase
+        .from('documents')
+        .select('file_data')
+        .eq('id', id)
+        .maybeSingle()
+
+      if (error) throw error
+      if (!data?.file_data) return null
+
+      const uint8Array = new Uint8Array(data.file_data)
+      let base64String = ''
+      for (let i = 0; i < uint8Array.length; i++) {
+        base64String += String.fromCharCode(uint8Array[i])
       }
-
-      const response = await fetch(doc.url)
-      const blob = await response.blob()
-
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onloadend = () => {
-          const base64 = reader.result as string
-          const base64Data = base64.split(',')[1]
-          resolve(base64Data)
-        }
-        reader.onerror = reject
-        reader.readAsDataURL(blob)
-      })
+      return btoa(base64String)
     } catch (error) {
       console.error('Error exporting document:', error)
       return null
@@ -188,17 +234,22 @@ class DocumentService {
   }
 
   async getAllDocumentsWithData(): Promise<Array<Document & { fileData: string }>> {
-    const documents = Array.from(this.documents.values())
-    const results = []
+    try {
+      const documents = await this.getAllDocuments()
+      const results = []
 
-    for (const doc of documents) {
-      const fileData = await this.exportDocumentAsBase64(doc.id)
-      if (fileData) {
-        results.push({ ...doc, fileData })
+      for (const doc of documents) {
+        const fileData = await this.exportDocumentAsBase64(doc.id)
+        if (fileData) {
+          results.push({ ...doc, fileData })
+        }
       }
-    }
 
-    return results
+      return results
+    } catch (error) {
+      console.error('Error fetching all documents with data:', error)
+      return []
+    }
   }
 
   private detectDocumentType(filename: string): DocumentType {

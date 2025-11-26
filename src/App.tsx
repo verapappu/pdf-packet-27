@@ -16,26 +16,40 @@ import AdminPanel from '@/components/AdminPanel'
 import type { AppState, ProjectFormData, SelectedDocument } from '@/types'
 
 // Utils
-import { storage } from '@/utils/appStateStorage'
-
-const STORAGE_KEY = 'pdf-packet-builder-state'
+import { appStateService } from '@/services/appStateService'
 
 function App() {
-  const [appState, setAppState] = useState<AppState>(() => {
-    const savedState = storage.get<AppState>(STORAGE_KEY)
-    return {
-      currentStep: savedState?.currentStep || 1,
-      formData: savedState?.formData || {},
-      selectedDocuments: savedState?.selectedDocuments || [],
-      isGenerating: false,
-      darkMode: savedState?.darkMode || false,
-    }
+  const [appState, setAppState] = useState<AppState>({
+    currentStep: 1,
+    formData: {},
+    selectedDocuments: [],
+    isGenerating: false,
+    darkMode: false,
   })
+  const [isLoading, setIsLoading] = useState(true)
 
-  // Save state to localStorage whenever it changes
   useEffect(() => {
-    storage.set(STORAGE_KEY, appState)
-  }, [appState])
+    const loadState = async () => {
+      try {
+        const savedState = await appStateService.loadAppState()
+        if (savedState) {
+          setAppState(savedState)
+        }
+      } catch (error) {
+        console.error('Failed to load app state:', error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadState()
+  }, [])
+
+  useEffect(() => {
+    if (!isLoading) {
+      appStateService.saveAppState(appState)
+    }
+  }, [appState, isLoading])
 
   // Update form data with useCallback to prevent infinite loops
   const updateFormData = useCallback((data: Partial<ProjectFormData>) => {
@@ -108,9 +122,9 @@ function App() {
       formData: {},
       selectedDocuments: [],
       isGenerating: false,
-      darkMode: appState.darkMode, // Preserve dark mode preference
+      darkMode: appState.darkMode,
     })
-    storage.remove(STORAGE_KEY)
+    appStateService.clearAppState()
   }
 
   const stepComponents = {
