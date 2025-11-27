@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Upload,
@@ -7,9 +8,11 @@ import {
   Save,
   X,
   FileText,
-  FolderOpen
+  FolderOpen,
+  LogOut
 } from 'lucide-react'
 import { documentService } from '@/services/documentService'
+import { authService } from '@/services/authService'
 import type { Document, DocumentType, ProductType } from '@/types'
 
 interface AdminPanelProps {
@@ -17,8 +20,10 @@ interface AdminPanelProps {
 }
 
 export default function AdminPanel({ onClose }: AdminPanelProps) {
+  const navigate = useNavigate()
   const [documents, setDocuments] = useState<Document[]>([])
   const [loading, setLoading] = useState(false)
+  const [checkingAuth, setCheckingAuth] = useState(true)
   const [uploadProgress, setUploadProgress] = useState<number>(0)
   const [selectedCategory, setSelectedCategory] = useState<ProductType>('structural-floor')
   const [editingDoc, setEditingDoc] = useState<string | null>(null)
@@ -27,8 +32,34 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
   const [success, setSuccess] = useState<string | null>(null)
 
   useEffect(() => {
-    loadDocuments()
+    checkAuthentication()
   }, [])
+
+  const checkAuthentication = async () => {
+    try {
+      const user = await authService.getCurrentUser()
+      if (!user) {
+        navigate('/admin/login')
+        return
+      }
+      await loadDocuments()
+    } catch (err) {
+      console.error('Auth check failed:', err)
+      navigate('/admin/login')
+    } finally {
+      setCheckingAuth(false)
+    }
+  }
+
+  const handleSignOut = async () => {
+    try {
+      await authService.signOut()
+      navigate('/admin/login')
+    } catch (err) {
+      console.error('Sign out failed:', err)
+      setError('Failed to sign out')
+    }
+  }
 
   const loadDocuments = async () => {
     try {
@@ -168,6 +199,17 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
   const structuralFloorDocs = documents.filter((doc) => doc.productType === 'structural-floor')
   const underlaymentDocs = documents.filter((doc) => doc.productType === 'underlayment')
 
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="spinner w-12 h-12 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Checking authentication...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 p-4">
       <div className="max-w-7xl mx-auto">
@@ -177,6 +219,10 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
             <p className="text-gray-600 dark:text-gray-400">Upload and manage PDF documents by category</p>
           </div>
           <div className="flex gap-3">
+            <button onClick={handleSignOut} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg flex items-center gap-2">
+              <LogOut className="w-5 h-5" />
+              Sign Out
+            </button>
             {onClose && (
               <button onClick={onClose} className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg">
                 <X className="inline-block w-5 h-5 mr-2" />

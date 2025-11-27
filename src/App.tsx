@@ -11,6 +11,7 @@ import DocumentOrdering from '@/components/steps/DocumentOrdering'
 import PacketGeneration from '@/components/steps/PacketGeneration'
 import ThemeProvider from '@/components/ThemeProvider'
 import AdminPanel from '@/components/AdminPanel'
+import AdminLogin from '@/components/AdminLogin'
 
 // Types
 import type { AppState, ProjectFormData, SelectedDocument } from '@/types'
@@ -138,12 +139,18 @@ function App() {
     <ThemeProvider darkMode={appState.darkMode}>
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 transition-colors duration-300">
         <Routes>
+          {/* Admin Login Route */}
+          <Route
+            path="/admin/login"
+            element={<AdminLogin />}
+          />
+
           {/* Admin Panel Route */}
           <Route
             path="/admin"
             element={<AdminPanel />}
           />
-          
+
           {/* Main App Route */}
           <Route
             path="/"
